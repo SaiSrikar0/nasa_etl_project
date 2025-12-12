@@ -1,6 +1,6 @@
-# NASA APOD ETL Pipeline
+# NASA APOD ETL Pipeline (Docker + Airflow)
 
-An automated ETL (Extract, Transform, Load) pipeline that fetches NASA's Astronomy Picture of the Day (APOD) data and stores it in a Supabase database.
+An automated ETL (Extract, Transform, Load) pipeline that fetches NASA's Astronomy Picture of the Day (APOD) data and stores it in a Supabase database. This repo includes an Apache Airflow stack via Docker Compose to schedule and run the pipeline daily.
 
 ## Project Overview
 
@@ -18,8 +18,12 @@ nasa_etl_project/
 │   └── staged/           # Transformed CSV data
 ├── scripts/
 │   ├── extract.py        # Fetches data from NASA APOD API
-│   ├── transform.py      # Trcdansforms JSON to CSV
+│   ├── transform.py      # Transforms JSON to CSV
 │   └── load.py           # Loads data into Supabase
+├── airflow/
+│   └── dags/
+│       └── nasa_etl_dags.py  # Airflow DAG: extract → transform → load
+├── docker-compose.yaml        # Airflow stack (webserver, scheduler, worker, db)
 └── README.md
 ```
 
@@ -39,44 +43,63 @@ CREATE TABLE nasa_apod (
 
 ## Prerequisites
 
-- Python 3.11+
+- Docker Desktop (Windows/macOS/Linux)
 - NASA API Key (get one at https://api.nasa.gov/)
 - Supabase account and project
 
-## Installation
+## Setup
 
-1. Clone this repository or navigate to the project directory
+1) Configure `.env` in the project root:
 
-2. Install required packages:
-```bash
-pip install requests pandas supabase python-dotenv
+```
+api_key=YOUR_NASA_API_KEY
+supabase_url=YOUR_SUPABASE_URL
+supabase_key=YOUR_SUPABASE_KEY
+AIRFLOW_IMAGE_NAME=apache/airflow:2.4.2
+AIRFLOW_UID=50000
+AIRFLOW_PROJ_DIR=./airflow
+_PIP_ADDITIONAL_REQUIREMENTS=supabase python-dotenv pandas requests
 ```
 
-3. Create a `.env` file in the project root with your credentials:
-```
-supabase_url=your_supabase_url
-supabase_key=your_supabase_key
+2) Start Docker Desktop, then bring up Airflow:
+
+```powershell
+docker compose up -d
 ```
 
-4. Update the NASA API key in `scripts/extract.py` (or use environment variables)
+3) Open Airflow UI at http://localhost:8080 (username: `airflow`, password: `airflow`).
+
+4) Populate Airflow Variables from `.env` (one-time setup):
+
+```powershell
+docker compose exec airflow-scheduler python /opt/airflow/dags/init_variables.py
+```
+
+This reads `.env` and auto-creates Variables: `api_key`, `supabase_url`, `supabase_key`.
+
+Alternatively, create Variables manually (Admin → Variables):
+- `api_key`: YOUR_NASA_API_KEY
+- `supabase_url`: YOUR_SUPABASE_URL
+- `supabase_key`: YOUR_SUPABASE_KEY
 
 ## Usage
 
-### Run the Complete ETL Pipeline
+### Run via Airflow (Recommended)
 
-Execute the scripts in order:
+1) In Airflow UI, ensure `nasa_etl_pipeline` is toggled ON.
+2) Trigger a manual run if desired (▶ button).
+3) Monitor task logs for `extract_nasa_data`, `transform_nasa_data`, and `load_to_supabase`.
+
+The DAG is scheduled `@daily` and will run automatically when the stack is up.
+
+### Run locally (optional)
+
+You can also run scripts outside Airflow for debugging:
 
 ```bash
-cd scripts
-
-# Step 1: Extract data from NASA API
-python extract.py
-
-# Step 2: Transform JSON to CSV
-python transform.py
-
-# Step 3: Load data into Supabase
-python load.py
+python scripts/extract.py
+python scripts/transform.py
+python scripts/load.py
 ```
 
 ### Individual Script Details
@@ -120,7 +143,15 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 ```
 
-## Error Handling
+Also ensure a `nasa_apod` table exists (see schema above). The loader uses RPC to insert batches.
+
+## Troubleshooting
+
+- Docker not starting: ensure Docker Desktop is running, then `docker compose up -d`.
+- DAG not visible: confirm `AIRFLOW_PROJ_DIR=./airflow` in `.env` and that `airflow/dags/nasa_etl_dags.py` exists.
+- Missing variables: set `api_key`, `supabase_url`, `supabase_key` in Airflow Variables.
+- Supabase RPC missing: create the `execute_sql` function as above.
+- Permissions/paths: scripts and data are mounted at `/opt/airflow/scripts` and `/opt/airflow/data` in containers.
 
 - File existence checks before processing
 - API request error handling with `raise_for_status()`
@@ -129,7 +160,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 ## Future Enhancements
 
-- Schedule automated daily runs using cron or task scheduler
+- Automated bootstrap of Airflow Variables from `.env`
 - Add data validation and quality checks
 - Implement incremental loading (avoid duplicates)
 - Add logging for better monitoring

@@ -27,16 +27,16 @@ def load_to_supabase():
     for i in range(0, len(df), batch_size):
         batch_df = df.iloc[i:i + batch_size]
         batch = batch_df.where(pd.notnull(batch_df), None).to_dict("records")
-        values = [
-            (
-                f"('{r['date']}', "
-                f"'{r['title'].replace("'", "''")}', "
-                f"'{r['explanation'].replace("'", "''")}', "
-                f"'{r['media_type']}', "
-                f"'{r.get('image_url', '')}')"
-            )
-            for r in batch
-        ]
+        
+        # Build SQL values without f-strings to avoid backslash issues
+        values = []
+        for r in batch:
+            date_val = r['date']
+            title_val = r['title'].replace("'", "''")
+            explanation_val = r['explanation'].replace("'", "''")
+            media_type_val = r['media_type']
+            image_url_val = r.get('image_url', '')
+            values.append(f"('{date_val}', '{title_val}', '{explanation_val}', '{media_type_val}', '{image_url_val}')")
         
         insert_sql = f"""
         INSERT INTO nasa_apod (date, title, explanation, media_type, image_url) VALUES {', '.join(values)};
