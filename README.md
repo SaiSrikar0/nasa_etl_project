@@ -22,7 +22,12 @@ nasa_etl_project/
 │   └── load.py           # Loads data into Supabase
 ├── airflow/
 │   └── dags/
-│       └── nasa_etl_dags.py  # Airflow DAG: extract → transform → load
+│       ├── nasa_etl_dags.py  # Airflow DAG: extract → transform → load
+│       └── init_variables.py # Bootstrap Airflow Variables from .env
+├── ui/
+│   ├── streamlit_app.py      # Streamlit frontend (gallery, search, stats)
+│   ├── requirements.txt       # Python dependencies for UI
+│   └── .streamlit/config.toml # Streamlit configuration
 ├── docker-compose.yaml        # Airflow stack (webserver, scheduler, worker, db)
 └── README.md
 ```
@@ -44,43 +49,63 @@ CREATE TABLE nasa_apod (
 ## Prerequisites
 
 - Docker Desktop (Windows/macOS/Linux)
+- Python 3.9+
 - NASA API Key (get one at https://api.nasa.gov/)
 - Supabase account and project
 
-## Setup
+## Quickstart
 
-1) Configure `.env` in the project root:
+1) Create `.env` from template and fill keys:
 
 ```
-api_key=YOUR_NASA_API_KEY
-supabase_url=YOUR_SUPABASE_URL
-supabase_key=YOUR_SUPABASE_KEY
-AIRFLOW_IMAGE_NAME=apache/airflow:2.4.2
-AIRFLOW_UID=50000
-AIRFLOW_PROJ_DIR=./airflow
-_PIP_ADDITIONAL_REQUIREMENTS=supabase python-dotenv pandas requests
+copy .env.example .env
+# Edit .env and set: api_key, supabase_url, supabase_key
 ```
 
-2) Start Docker Desktop, then bring up Airflow:
+2) Start Docker and Airflow stack:
 
 ```powershell
 docker compose up -d
 ```
 
-3) Open Airflow UI at http://localhost:8080 (username: `airflow`, password: `airflow`).
-
-4) Populate Airflow Variables from `.env` (one-time setup):
+3) Initialize Airflow Variables from `.env`:
 
 ```powershell
 docker compose exec airflow-scheduler python /opt/airflow/dags/init_variables.py
 ```
 
-This reads `.env` and auto-creates Variables: `api_key`, `supabase_url`, `supabase_key`.
+4) Ensure Supabase has the table and unique constraint on `date` (run in Supabase SQL editor):
 
-Alternatively, create Variables manually (Admin → Variables):
-- `api_key`: YOUR_NASA_API_KEY
-- `supabase_url`: YOUR_SUPABASE_URL
-- `supabase_key`: YOUR_SUPABASE_KEY
+```sql
+CREATE TABLE IF NOT EXISTS public.nasa_apod (
+    id SERIAL PRIMARY KEY,
+    date DATE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    explanation TEXT NOT NULL,
+    media_type VARCHAR(50),
+    image_url TEXT,
+    inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.nasa_apod
+  ADD CONSTRAINT IF NOT EXISTS nasa_apod_date_key UNIQUE (date);
+```
+
+5) Test the DAG for today's run:
+
+```powershell
+docker compose exec airflow-scheduler airflow dags test nasa_etl_pipeline 2025-12-14
+```
+
+6) Launch the Streamlit UI:
+
+```powershell
+cd ui
+python -m pip install -r requirements.txt
+streamlit run streamlit_app.py --server.port 8501
+```
+
+Open http://localhost:8501
 
 ## Usage
 
@@ -91,6 +116,24 @@ Alternatively, create Variables manually (Admin → Variables):
 3) Monitor task logs for `extract_nasa_data`, `transform_nasa_data`, and `load_to_supabase`.
 
 The DAG is scheduled `@daily` and will run automatically when the stack is up.
+
+### Run Streamlit UI Locally
+
+View and interact with APOD data in a web browser:
+
+```bash
+cd ui
+streamlit run streamlit_app.py
+```
+
+Open http://localhost:8501 to browse the APOD gallery, search records, and view stats. Videos play inline when `media_type=video`, otherwise images render responsively.
+
+**Features:**
+- 🖼️ Gallery view with images and descriptions
+- 🔍 Search by keyword, date range, or media type
+- 📊 Dashboard with stats (total records, last update)
+- ⚙️ Pipeline status indicator
+- 📱 Responsive design
 
 ### Run locally (optional)
 
@@ -145,6 +188,8 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 Also ensure a `nasa_apod` table exists (see schema above). The loader uses RPC to insert batches.
 
+For idempotent loads without duplicates, ensure `UNIQUE(date)` on `nasa_apod`. The loader performs an upsert via SQL RPC using `ON CONFLICT (date) DO UPDATE`.
+
 ## Troubleshooting
 
 - Docker not starting: ensure Docker Desktop is running, then `docker compose up -d`.
@@ -152,6 +197,33 @@ Also ensure a `nasa_apod` table exists (see schema above). The loader uses RPC t
 - Missing variables: set `api_key`, `supabase_url`, `supabase_key` in Airflow Variables.
 - Supabase RPC missing: create the `execute_sql` function as above.
 - Permissions/paths: scripts and data are mounted at `/opt/airflow/scripts` and `/opt/airflow/data` in containers.
+- Streamlit won't load data: verify `.env` is in project root with valid Supabase credentials.
+ - Windows path issues: if `streamlit_app.py` isn't found, run via absolute path or `cd ui` first.
+
+## Deployment
+
+### Deploy Streamlit Frontend (Free)
+
+1) Push the repo to GitHub (already done ✓).
+2) Go to [Streamlit Cloud](https://streamlit.io/cloud).
+3) Click "New app" → connect GitHub repo.
+4) Select `ui/streamlit_app.py` as the main file.
+5) Add Secrets (in Streamlit Cloud settings):
+   ```
+   supabase_url = "your_url"
+   supabase_key = "your_key"
+   ```
+6) Click "Deploy" — app is live at `https://<your-username>-nasa-etl-project.streamlit.app`
+
+### Deploy Airflow (Optional - Self-Hosted)
+
+For production, deploy Airflow to:
+- AWS EC2 + Docker
+- Google Cloud Run
+- DigitalOcean
+- Railway
+
+Currently running locally; ideal for portfolio demo.
 
 - File existence checks before processing
 - API request error handling with `raise_for_status()`
@@ -166,6 +238,8 @@ Also ensure a `nasa_apod` table exists (see schema above). The loader uses RPC t
 - Add logging for better monitoring
 - Create a combined pipeline script
 - Add unit tests
+- Advanced Streamlit features: user ratings, favorites, sharing
+- Multi-user authentication for Streamlit Cloud
 
 ## License
 

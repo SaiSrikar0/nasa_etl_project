@@ -1,0 +1,13 @@
+[theme]
+base = "dark"
+primaryColor = "#00d4ff"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#161b22"
+textColor = "#e6edf3"
+
+[client]
+showErrorDetails = true
+showSidebarNavigation = true
+
+[logger]
+level = "info"

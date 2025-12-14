@@ -1,15 +1,18 @@
-# Environment variables
+# Environment variables and secrets
 .env
 .env.local
 .env.*.local
+ui/.streamlit/secrets.toml
 
 # Data files (generated at runtime)
 data/raw/*.json
-data/staged/*.csv
+# keep staged CSVs tracked (comment out if desired)
+# data/staged/*.csv
 
 # Airflow logs and database
 airflow/logs/
 airflow/webserver_config.py
+airflow/plugins/__pycache__/
 
 # Python
 __pycache__/
