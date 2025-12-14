@@ -30,6 +30,59 @@ def init_supabase():
 
 supabase = init_supabase()
 
+# Airflow configuration
+AIRFLOW_URL = os.getenv("AIRFLOW_URL", "http://localhost:8080")
+AIRFLOW_USERNAME = os.getenv("AIRFLOW_USERNAME", "airflow")
+AIRFLOW_PASSWORD = os.getenv("AIRFLOW_PASSWORD", "airflow")
+DAG_ID = "nasa_etl_pipeline"
+
+# ============== AIRFLOW TRIGGER ==============
+def get_record_count():
+    """Get current record count from Supabase"""
+    try:
+        response = supabase.table("nasa_apod").select("*", count="exact").execute()
+        return len(response.data) if response.data else 0
+    except:
+        return 0
+
+def trigger_dag():
+    """Trigger Airflow DAG via REST API"""
+    try:
+        # Capture count before pipeline run
+        count_before = get_record_count()
+        
+        url = f"{AIRFLOW_URL}/api/v1/dags/{DAG_ID}/dagRuns"
+        headers = {"Content-Type": "application/json"}
+        payload = {"conf": {}}
+        
+        response = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            auth=(AIRFLOW_USERNAME, AIRFLOW_PASSWORD),
+            timeout=10
+        )
+        
+        if response.status_code in [200, 201]:
+            # Give pipeline time to complete (adjust as needed)
+            import time
+            time.sleep(8)
+            
+            # Check count after pipeline run
+            count_after = get_record_count()
+            
+            # Determine message based on whether new data was added
+            if count_after > count_before:
+                message = f"✅ Pipeline completed! Added {count_after - count_before} new record(s)."
+            else:
+                message = "ℹ️ Pipeline completed. You are up to date – no new information has been extracted."
+            
+            return True, message
+        else:
+            return False, f"❌ Failed to trigger pipeline: {response.status_code} - {response.text}"
+    except Exception as e:
+        return False, f"❌ Error triggering pipeline: {str(e)}"
+
 # ============== DARK THEME CSS ==============
 dark_css = """
 <style>
@@ -150,8 +203,25 @@ with st.sidebar:
     """)
 
 # ============== HEADER ==============
-st.markdown("<div class='header-title'>🚀 NASA APOD Explorer</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Explore the Universe – Daily Astronomy Picture of the Day</div>", unsafe_allow_html=True)
+col_title, col_button = st.columns([4, 1])
+
+with col_title:
+    st.markdown("<div class='header-title'>🚀 NASA APOD Explorer</div>", unsafe_allow_html=True)
+    st.markdown("<div class='subtitle'>Explore the Universe – Daily Astronomy Picture of the Day</div>", unsafe_allow_html=True)
+
+with col_button:
+    st.write("")  # Spacer for alignment
+    if st.button("▶️ Run Pipeline", type="primary", use_container_width=True, help="Manually trigger Airflow DAG"):
+        with st.spinner("⏳ Running pipeline..."):
+            success, message = trigger_dag()
+            if success:
+                st.success(message)
+                st.balloons()
+                st.cache_data.clear()
+            else:
+                st.error(message)
+
+st.divider()
 
 # ============== FETCH DATA ==============
 @st.cache_data(ttl=3600)
